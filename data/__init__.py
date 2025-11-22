@@ -15,9 +15,9 @@ loader = DataLoader(
     collate_fn = synth90k_collate_fn
 )
 
-for images, target, length in loader:
+for images, targets, lengths in loader:
     print("img size:", images.shape)
-    print("target:", target)
-    print("length:", length)
+    print("targets:", targets)
+    print("lengths:", lengths)
 
     break
