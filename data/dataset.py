@@ -32,10 +32,12 @@ class Synth90kDataset(Dataset):
         paths_file = None
         if mode == 'train':
             paths_file = 'annotation_train.txt'
-        elif mode == 'dev':
+        elif mode in ('val', 'validation', 'dev'):
             paths_file = 'annotation_val.txt'
         elif mode == 'test':
             paths_file = 'annotation_test.txt'
+        else:
+            raise ValueError(f"Unsupported split '{mode}'. Expected one of ['train', 'val', 'test'].")
 
         paths = []
         texts = []

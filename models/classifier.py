@@ -15,7 +15,7 @@ from transformers.modeling_outputs import ModelOutput
 from transformers.trainer_utils import set_seed
 from transformers.utils import logging
 
-from utils.dataset import Synth90kCTCCollator, Synth90kDataset
+from data.dataset import Synth90kDataset, synth90k_collate_fn
 
 logger = logging.get_logger(__name__)
 
@@ -63,28 +63,54 @@ class ViTMAEForCTC(PreTrainedModel):
         return CTCOutput(loss=loss, logits=logits)
 
 
+class Synth90kCTCCollator:
+    """
+    Collator for CTC training that batches images and labels.
+    Compatible with the tuple format returned by Synth90kDataset.
+    """
+
+    def __call__(self, batch):
+        """
+        Collate batch of samples from Synth90kDataset.
+
+        Args:
+            batch: List of tuples (image, target, target_length)
+
+        Returns:
+            dict with:
+                - pixel_values: Tensor of shape [batch_size, 3, height, width]
+                - labels: Concatenated target tensor
+                - label_lengths: Tensor of label lengths
+        """
+        pixel_values, labels, label_lengths = synth90k_collate_fn(batch)
+
+        return {
+            "pixel_values": pixel_values,
+            "labels": labels,
+            "label_lengths": label_lengths,
+        }
+
+
 def _load_vitmae_config(checkpoint: str, vocab_size: int) -> ViTMAEConfig:
     config = ViTMAEConfig.from_pretrained(checkpoint)
     config.vocab_size = vocab_size
     return config
 
 
-def _build_datasets(data_cfg: dict, image_processor: AutoImageProcessor):
+def _build_datasets(data_cfg: dict):
     train_ds = Synth90kDataset(
         root_dir=data_cfg["root"],
-        mode=data_cfg.get("train_split", "train"),
+        mode="train",
         img_height=data_cfg.get("img_height", 224),
         img_width=data_cfg.get("img_width", 224),
-        image_processor=image_processor,
     )
     eval_ds = None
-    if data_cfg.get("val_split"):
+    if data_cfg.get("val_split") is not None:
         eval_ds = Synth90kDataset(
             root_dir=data_cfg["root"],
-            mode=data_cfg.get("val_split"),
+            mode="val",
             img_height=data_cfg.get("img_height", 224),
             img_width=data_cfg.get("img_width", 224),
-            image_processor=image_processor,
         )
     return train_ds, eval_ds
 
@@ -103,7 +129,7 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
 
     image_processor = AutoImageProcessor.from_pretrained(mae_init)
     data_cfg = cfg["data"]
-    train_ds, eval_ds = _build_datasets(data_cfg, image_processor)
+    train_ds, eval_ds = _build_datasets(data_cfg)
 
     config = _load_vitmae_config(mae_init, vocab_size)
     model = ViTMAEForCTC(config=config)
@@ -120,25 +146,25 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
             logger.warning("Could not load MAE weights from %s, training encoder from scratch", mae_init)
 
     collator = Synth90kCTCCollator()
-    evaluation_strategy = "steps" if eval_ds else "no"
+    eval_strategy = "steps" if eval_ds else "no"
 
     training_args = TrainingArguments(
         output_dir=training_cfg["output_dir"],
-        per_device_train_batch_size=training_cfg.get("per_device_train_batch_size", 16),
-        per_device_eval_batch_size=training_cfg.get("per_device_eval_batch_size", 16),
-        num_train_epochs=training_cfg.get("num_train_epochs", 1),
-        learning_rate=training_cfg.get("learning_rate", 3e-4),
-        weight_decay=training_cfg.get("weight_decay", 0.01),
-        warmup_steps=training_cfg.get("warmup_steps", 250),
-        logging_steps=training_cfg.get("logging_steps", 50),
-        eval_steps=training_cfg.get("eval_steps", 500),
-        save_steps=training_cfg.get("save_steps", 1000),
-        gradient_accumulation_steps=training_cfg.get("gradient_accumulation_steps", 1),
-        evaluation_strategy=evaluation_strategy,
+        per_device_train_batch_size=int(training_cfg.get("per_device_train_batch_size", 16)),
+        per_device_eval_batch_size=int(training_cfg.get("per_device_eval_batch_size", 16)),
+        num_train_epochs=int(training_cfg.get("num_train_epochs", 1)),
+        learning_rate=float(training_cfg.get("learning_rate", 3e-4)),
+        weight_decay=float(training_cfg.get("weight_decay", 0.01)),
+        warmup_steps=int(training_cfg.get("warmup_steps", 250)),
+        logging_steps=int(training_cfg.get("logging_steps", 50)),
+        eval_steps=int(training_cfg.get("eval_steps", 500)),
+        save_steps=int(training_cfg.get("save_steps", 1000)),
+        gradient_accumulation_steps=int(training_cfg.get("gradient_accumulation_steps", 1)),
+        eval_strategy=eval_strategy,
         save_strategy=training_cfg.get("save_strategy", "steps"),
-        dataloader_num_workers=data_cfg.get("num_workers", 4),
+        dataloader_num_workers=int(data_cfg.get("num_workers", 4)),
         remove_unused_columns=False,
-        fp16=training_cfg.get("fp16", False),
+        fp16=bool(training_cfg.get("fp16", False)),
         label_names=["labels", "label_lengths"],
         report_to=training_cfg.get("report_to", "none"),
     )
