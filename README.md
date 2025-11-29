@@ -71,12 +71,45 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Training
+This project uses a two-stage training approach: (1) MAE pretraining for self-supervised visual representation learning, and (2) CTC classifier fine-tuning for OCR. The MAE stage is optional but recommended for improved performance.
 
-To train the model, configure your parameters in `configs/config.yaml` and run:
+### Configuration Setup
+
+Example configuration files are provided as templates. Copy them to create your own configs:
 
 ```bash
-python train.py --config configs/config.yaml
+cp configs/mae.ex.yaml configs/mae.yaml
+cp configs/cls.ex.yaml configs/cls.yaml
+```
+
+Edit the config files to adjust parameters like data paths, batch size, learning rate, epochs, etc. See the example configs for all available parameters.
+
+### Stage 1: MAE Pretraining (Optional)
+
+The MAE (Masked Autoencoder) stage pretrains a Vision Transformer encoder by learning to reconstruct masked image patches. This provides strong visual representations for downstream tasks.
+
+```bash
+python train.py --config configs/mae.yaml
+```
+
+The pretrained model will be saved to `outputs/mae_pretrain`. You can skip this stage and use the base pretrained weights from HuggingFace if preferred.
+
+### Stage 2: Classifier Training
+
+The classifier stage fine-tunes the model for OCR using CTC loss on the Synth90k dataset. It loads the MAE pretrained encoder and adds a classification head.
+
+```bash
+python train.py --config configs/cls.yaml
+```
+
+The trained classifier will be saved to `outputs/classifier`. Make sure the `mae_checkpoint_for_init` parameter in your config points to the correct MAE checkpoint path from Stage 1.
+
+### Resuming Training
+
+If training is interrupted, you can resume from a checkpoint:
+
+```bash
+python train.py --config <config_file> --resume_from <checkpoint_path>
 ```
 
 ### Inference

@@ -16,6 +16,7 @@ from transformers.trainer_utils import set_seed
 from transformers.utils import logging
 
 from data.dataset import Synth90kDataset, synth90k_collate_fn
+from utils.logging_callbacks import CsvLoggingCallback
 
 logger = logging.get_logger(__name__)
 
@@ -147,6 +148,7 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
 
     collator = Synth90kCTCCollator()
     eval_strategy = "steps" if eval_ds else "no"
+    load_best = eval_strategy != "no" and bool(training_cfg.get("load_best_model_at_end", True))
 
     training_args = TrainingArguments(
         output_dir=training_cfg["output_dir"],
@@ -155,13 +157,24 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
         num_train_epochs=int(training_cfg.get("num_train_epochs", 1)),
         learning_rate=float(training_cfg.get("learning_rate", 3e-4)),
         weight_decay=float(training_cfg.get("weight_decay", 0.01)),
-        warmup_steps=int(training_cfg.get("warmup_steps", 250)),
+        optim=training_cfg.get("optim", "adamw_hf"),
+        adam_beta1=float(training_cfg.get("adam_beta1", 0.9)),
+        adam_beta2=float(training_cfg.get("adam_beta2", 0.999)),
+        adam_epsilon=float(training_cfg.get("adam_epsilon", 1e-8)),
+        lr_scheduler_type=training_cfg.get("lr_scheduler_type", "cosine"),
+        warmup_steps=int(training_cfg.get("warmup_steps", 0)),
+        warmup_ratio=float(training_cfg.get("warmup_ratio", 0.0)),
         logging_steps=int(training_cfg.get("logging_steps", 50)),
         eval_steps=int(training_cfg.get("eval_steps", 500)),
         save_steps=int(training_cfg.get("save_steps", 1000)),
         gradient_accumulation_steps=int(training_cfg.get("gradient_accumulation_steps", 1)),
+        max_grad_norm=float(training_cfg.get("max_grad_norm", 1.0)),
         eval_strategy=eval_strategy,
         save_strategy=training_cfg.get("save_strategy", "steps"),
+        load_best_model_at_end=load_best,
+        metric_for_best_model=training_cfg.get("metric_for_best_model", "eval_loss"),
+        greater_is_better=bool(training_cfg.get("greater_is_better", False)),
+        save_total_limit=training_cfg.get("save_total_limit"),
         dataloader_num_workers=int(data_cfg.get("num_workers", 4)),
         remove_unused_columns=False,
         fp16=bool(training_cfg.get("fp16", False)),
@@ -175,6 +188,7 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=collator,
+        callbacks=[CsvLoggingCallback(training_cfg["output_dir"])],
     )
 
     trainer.train(resume_from_checkpoint=resume_from or training_cfg.get("resume_from_checkpoint"))
