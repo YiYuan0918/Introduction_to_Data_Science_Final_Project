@@ -162,3 +162,9 @@ cython_debug/
 
 # pycharm
 .idea
+
+# dataset
+dataset/
+
+# exp result
+outputs/
