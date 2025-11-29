@@ -10,6 +10,7 @@ from transformers import (
 from transformers.trainer_utils import set_seed
 
 from data.dataset import Synth90kDataset
+from utils.logging_callbacks import CsvLoggingCallback
 
 
 class Synth90kImageDictDataset(Synth90kDataset):
@@ -57,6 +58,7 @@ def run_mae_pretraining(cfg: dict, resume_from: Optional[str] = None) -> None:
 
     training_cfg = cfg["training"]["mae"]
     eval_strategy = "steps" if eval_ds else "no"
+    load_best = eval_strategy != "no" and bool(training_cfg.get("load_best_model_at_end", True))
 
     training_args = TrainingArguments(
         output_dir=training_cfg["output_dir"],
@@ -72,6 +74,10 @@ def run_mae_pretraining(cfg: dict, resume_from: Optional[str] = None) -> None:
         gradient_accumulation_steps=int(training_cfg.get("gradient_accumulation_steps", 1)),
         eval_strategy=eval_strategy,
         save_strategy=training_cfg.get("save_strategy", "steps"),
+        load_best_model_at_end=load_best,
+        metric_for_best_model=training_cfg.get("metric_for_best_model", "eval_loss"),
+        greater_is_better=bool(training_cfg.get("greater_is_better", False)),
+        save_total_limit=training_cfg.get("save_total_limit"),
         dataloader_num_workers=int(data_cfg.get("num_workers", 4)),
         remove_unused_columns=False,
         fp16=bool(training_cfg.get("fp16", False)),
@@ -87,6 +93,7 @@ def run_mae_pretraining(cfg: dict, resume_from: Optional[str] = None) -> None:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=data_collator,
+        callbacks=[CsvLoggingCallback(training_cfg["output_dir"])],
     )
 
     trainer.train(resume_from_checkpoint=resume_from or training_cfg.get("resume_from_checkpoint"))
