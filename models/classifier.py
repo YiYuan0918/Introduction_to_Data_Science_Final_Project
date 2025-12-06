@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
+import os
 
 import torch
 import torch.nn as nn
@@ -22,13 +23,13 @@ logger = logging.get_logger(__name__)
 
 
 @dataclass
-class CTCOutput(ModelOutput):
+class ImageClassificationOutput(ModelOutput):
     loss: Optional[torch.Tensor] = None
     logits: Optional[torch.Tensor] = None
 
 
-class ViTMAEForCTC(PreTrainedModel):
-    """Thin classification head on top of ViT-MAE encoder for CTC OCR."""
+class ViTMAEForImageClassification(PreTrainedModel):
+    """Vision Transformer with MAE backbone for image classification."""
 
     config_class = ViTMAEConfig
 
@@ -37,36 +38,37 @@ class ViTMAEForCTC(PreTrainedModel):
         self.encoder = ViTMAEModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.vocab_size)
-        self.ctc_loss = nn.CTCLoss(blank=0, zero_infinity=True)
         self.post_init()
 
-    def forward(self, pixel_values, labels=None, label_lengths=None, return_dict: Optional[bool] = None):
+    def forward(self, pixel_values, labels=None, return_dict: Optional[bool] = None):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        outputs = self.encoder(pixel_values=pixel_values, return_dict=return_dict)
-        sequence_output = self.dropout(outputs.last_hidden_state)
-        logits = self.classifier(sequence_output)
 
+        # Get encoder outputs
+        outputs = self.encoder(pixel_values=pixel_values, return_dict=return_dict)
+
+        # Use [CLS] token representation (first token)
+        cls_output = outputs.last_hidden_state[:, 0, :]
+
+        # Apply dropout and classification head
+        cls_output = self.dropout(cls_output)
+        logits = self.classifier(cls_output)  # [batch_size, num_classes]
+
+        # Calculate loss if labels provided
         loss = None
-        if labels is not None and label_lengths is not None:
-            log_probs = logits.log_softmax(dim=-1).transpose(0, 1)  # (T, B, C)
-            input_lengths = torch.full(
-                size=(log_probs.size(1),),
-                fill_value=log_probs.size(0),
-                dtype=torch.long,
-                device=log_probs.device,
-            )
-            loss = self.ctc_loss(log_probs, labels, input_lengths, label_lengths)
+        if labels is not None:
+            loss_fct = nn.CrossEntropyLoss()
+            loss = loss_fct(logits, labels)
 
         if not return_dict:
             output = (logits,)
             return ((loss,) + output) if loss is not None else output
 
-        return CTCOutput(loss=loss, logits=logits)
+        return ImageClassificationOutput(loss=loss, logits=logits)
 
 
-class Synth90kCTCCollator:
+class Synth90kClassificationCollator:
     """
-    Collator for CTC training that batches images and labels.
+    Collator for image classification training.
     Compatible with the tuple format returned by Synth90kDataset.
     """
 
@@ -75,21 +77,27 @@ class Synth90kCTCCollator:
         Collate batch of samples from Synth90kDataset.
 
         Args:
-            batch: List of tuples (image, target, target_length)
+            batch: List of tuples (image, label) or list of images
 
         Returns:
             dict with:
                 - pixel_values: Tensor of shape [batch_size, 3, height, width]
-                - labels: Concatenated target tensor
-                - label_lengths: Tensor of label lengths
+                - labels: Tensor of shape [batch_size] with class indices (0-88171)
         """
-        pixel_values, labels, label_lengths = synth90k_collate_fn(batch)
+        result = synth90k_collate_fn(batch)
 
-        return {
-            "pixel_values": pixel_values,
-            "labels": labels,
-            "label_lengths": label_lengths,
-        }
+        if isinstance(result, tuple):
+            # Training case: (images, labels)
+            pixel_values, labels = result
+            return {
+                "pixel_values": pixel_values,
+                "labels": labels,
+            }
+        else:
+            # MAE pretraining case: just images
+            return {
+                "pixel_values": result,
+            }
 
 
 def _load_vitmae_config(checkpoint: str, vocab_size: int) -> ViTMAEConfig:
@@ -121,7 +129,7 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
     if seed is not None:
         set_seed(seed)
 
-    vocab_size = len(Synth90kDataset.CHARS) + 1  # +1 for CTC blank
+    vocab_size = Synth90kDataset.NUM_CLASSES  # 88172 word classes
 
     training_cfg = cfg["training"]["classifier"]
     mae_init = training_cfg.get("mae_checkpoint_for_init") or cfg["model"].get("mae_checkpoint")
@@ -133,7 +141,7 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
     train_ds, eval_ds = _build_datasets(data_cfg)
 
     config = _load_vitmae_config(mae_init, vocab_size)
-    model = ViTMAEForCTC(config=config)
+    model = ViTMAEForImageClassification(config=config)
 
     if mae_init:
         try:
@@ -146,7 +154,7 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
         except OSError:
             logger.warning("Could not load MAE weights from %s, training encoder from scratch", mae_init)
 
-    collator = Synth90kCTCCollator()
+    collator = Synth90kClassificationCollator()
     eval_strategy = "steps" if eval_ds else "no"
     load_best = eval_strategy != "no" and bool(training_cfg.get("load_best_model_at_end", True))
 
@@ -178,7 +186,7 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
         dataloader_num_workers=int(data_cfg.get("num_workers", 4)),
         remove_unused_columns=False,
         fp16=bool(training_cfg.get("fp16", False)),
-        label_names=["labels", "label_lengths"],
+        label_names=["labels"],
         report_to=training_cfg.get("report_to", "none"),
     )
 
@@ -192,8 +200,17 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
     )
 
     trainer.train(resume_from_checkpoint=resume_from or training_cfg.get("resume_from_checkpoint"))
+
+    # Save best model to separate directory if evaluation was enabled
+    if eval_ds is not None and load_best:
+        best_checkpoint_dir = os.path.join(training_cfg["output_dir"], "best_checkpoint")
+        logger.info(f"Saving best model to {best_checkpoint_dir}")
+        trainer.save_model(best_checkpoint_dir)
+        image_processor.save_pretrained(best_checkpoint_dir)
+
+    # Save final/last model to root output directory
     trainer.save_model(training_cfg["output_dir"])
     image_processor.save_pretrained(training_cfg["output_dir"])
 
 
-__all__ = ["run_classification_training", "ViTMAEForCTC"]
+__all__ = ["run_classification_training", "ViTMAEForImageClassification"]

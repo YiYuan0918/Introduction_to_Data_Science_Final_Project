@@ -5,18 +5,16 @@ from PIL import Image
 import numpy as np
 
 class Synth90kDataset(Dataset):
-    CHARS = '0123456789abcdefghijklmnopqrstuvwxyz'
-    CHAR2LABEL = {char: i + 1 for i, char in enumerate(CHARS)}
-    LABEL2CHAR = {label: char for char, label in CHAR2LABEL.items()}
+    NUM_CLASSES = 88172  # Total number of unique words in lexicon
 
     def __init__(self, root_dir=None, mode=None, paths=None, img_height=224, img_width=224):
         if root_dir and mode and not paths:
-            paths, texts = self._load_from_raw_files(root_dir, mode)
+            paths, labels = self._load_from_raw_files(root_dir, mode)
         elif not root_dir and not mode and paths:
-            texts = None
+            labels = None
 
         self.paths = paths
-        self.texts = texts
+        self.labels = labels
         self.img_height = img_height
         self.img_width = img_width
 
@@ -24,11 +22,6 @@ class Synth90kDataset(Dataset):
         self.std = np.array([0.229, 0.224, 0.225])
 
     def _load_from_raw_files(self, root_dir, mode):
-        mapping = {}
-        with open(os.path.join(root_dir, 'lexicon.txt'), 'r') as fr:
-            for i, line in enumerate(fr.readlines()):
-                mapping[i] = line.strip()
-
         paths_file = None
         if mode == 'train':
             paths_file = 'annotation_train.txt'
@@ -40,17 +33,16 @@ class Synth90kDataset(Dataset):
             raise ValueError(f"Unsupported split '{mode}'. Expected one of ['train', 'val', 'test'].")
 
         paths = []
-        texts = []
+        labels = []
         with open(os.path.join(root_dir, paths_file), 'r') as fr:
             for line in fr.readlines():
                 path, index_str = line.strip().split(' ')
                 path = os.path.join(root_dir, path)
-                index = int(index_str)
-                text = mapping[index]
+                label = int(index_str)
                 paths.append(path)
-                texts.append(text)
+                labels.append(label)
 
-        return paths, texts
+        return paths, labels
 
     def __len__(self):
         return len(self.paths)
@@ -83,25 +75,33 @@ class Synth90kDataset(Dataset):
         img_np = np.transpose(img_np, (2, 0, 1))    #HWC -> CHW
         image = torch.FloatTensor(img_np)           #shape = [3, 224, 224]
 
-        #character to tensor
-        image = torch.FloatTensor(image)
-        if self.texts:
-            text = self.texts[index]
-            target = [self.CHAR2LABEL[c] for c in text]
-            target_length = [len(target)]
-
-            target = torch.LongTensor(target)
-            target_length = torch.LongTensor(target_length)
-            
-            return image, target, target_length
+        #classification label
+        if self.labels is not None:
+            label = self.labels[index]
+            return image, label
         else:
             return image
 
 
 def synth90k_collate_fn(batch):
-    images, targets, target_lengths = zip(*batch)
-    images = torch.stack(images, 0)
-    targets = torch.cat(targets, 0)
-    target_lengths = torch.cat(target_lengths, 0)
-    return images, targets, target_lengths
+    """
+    Collate function for image classification.
+
+    Args:
+        batch: List of tuples (image, label) or list of images
+
+    Returns:
+        If labels present: (images, labels) as stacked tensors
+        If no labels: images as stacked tensor
+    """
+    # Check if batch contains labels (tuples) or just images
+    if isinstance(batch[0], tuple):
+        images, labels = zip(*batch)
+        images = torch.stack(images, 0)  # [B, 3, H, W]
+        labels = torch.LongTensor(labels)  # [B]
+        return images, labels
+    else:
+        # MAE pretraining case (no labels)
+        images = torch.stack(batch, 0)
+        return images
 
