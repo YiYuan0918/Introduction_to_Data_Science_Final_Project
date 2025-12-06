@@ -71,7 +71,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-This project uses a two-stage training approach: (1) MAE pretraining for self-supervised visual representation learning, and (2) CTC classifier fine-tuning for OCR. The MAE stage is optional but recommended for improved performance.
+This project uses a two-stage training approach: (1) MAE pretraining for self-supervised visual representation learning, and (2) classifier fine-tuning for word-level image classification. The MAE stage is optional but recommended for improved performance.
 
 ### Configuration Setup
 
@@ -96,13 +96,15 @@ The pretrained model will be saved to `outputs/mae_pretrain`. You can skip this 
 
 ### Stage 2: Classifier Training
 
-The classifier stage fine-tunes the model for OCR using CTC loss on the Synth90k dataset. It loads the MAE pretrained encoder and adds a classification head.
+The classifier stage fine-tunes the model for word-level image classification using CrossEntropyLoss on the Synth90k dataset. It loads the MAE pretrained encoder and adds a classification head for 88,172 word classes.
 
 ```bash
 python train.py --config configs/cls.yaml
 ```
 
 The trained classifier will be saved to `outputs/classifier`. Make sure the `mae_checkpoint_for_init` parameter in your config points to the correct MAE checkpoint path from Stage 1.
+
+**Note:** With 88,172 classes, the classification head is large (~67M parameters). You may need to reduce batch size (to 32 or 16) if you encounter out-of-memory errors.
 
 ### Resuming Training
 
@@ -121,19 +123,18 @@ python infer.py --model-path <path-to-trained-model> --input <input-data>
 ```
 
 ## Dataset: Synth90k
-This project uses the Synth90k synthetic word recognition dataset as the training corpus for ViT-based OCR.
+This project uses the Synth90k synthetic word recognition dataset for word-level image classification.
 
 #### Dataset Description
 Components contains:
-- `Synth90kDataset`：PyTorch Dataset tailored for Synth90k
-- `synth90k_collate_fn`：collate function for batching variable-length text labels
+- `Synth90kDataset`：PyTorch Dataset tailored for Synth90k with 88,172 word classes
+- `synth90k_collate_fn`：collate function for batching images and class labels
 
 #### Preprocessing includes:
 - Convert to RGB
-- Resize to (224×224)
+- Resize to (224×224) with aspect-ratio preserving padding
 - Normalize using ImageNet mean/std
-- Convert text into character-level label sequence
-- Map characters using predefined vocabulary
+- Map images to word class labels (0-88171) from lexicon.txt
 
 
 ### Synth90k dataset Structure 
@@ -173,7 +174,7 @@ from data import Synth90kDataset, synth90k_collate_fn
 root = r"mnt/ramdisk/max/90kDICT32px"
 
 dataset = Synth90kDataset(
-    root_dir= root,
+    root_dir=root,
     mode="train",
 )
 
@@ -181,9 +182,11 @@ batch = 8
 loader = DataLoader(
     dataset,
     batch_size=batch,
-    collate_fn = synth90k_collate_fn,
+    collate_fn=synth90k_collate_fn,
 )
 
-for images, targets, lengths in loader:
+for images, labels in loader:
+    # images: [batch_size, 3, 224, 224]
+    # labels: [batch_size] with values in range [0, 88171]
     pass
 ```

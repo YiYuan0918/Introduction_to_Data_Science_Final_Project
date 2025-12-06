@@ -1,3 +1,4 @@
+# Classification task: 88,172-class word-level image classification
 task: classifier
 seed: 42
 
