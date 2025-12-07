@@ -51,22 +51,75 @@ def run_mae_pretraining(cfg: dict, resume_from: Optional[str] = None) -> None:
 
     model_cfg = cfg["model"]
     model_name = model_cfg.get("mae_checkpoint", "facebook/vit-mae-base")
-    image_processor = AutoImageProcessor.from_pretrained(model_name)
 
     data_cfg = cfg["data"]
+    img_h = int(data_cfg.get("img_height", 224))
+    img_w = int(data_cfg.get("img_width", 224))
+
+    # ViT-MAE expects square inputs. If a rectangular size is provided, upscale
+    # the smaller side so that both dimensions match the largest one.
+    target_image_size = max(img_h, img_w)
+    if img_h != img_w:
+        logger.warning(
+            f"MAE expects square inputs; received {img_h}x{img_w}. "
+            f"Padding/resizing to square {target_image_size}x{target_image_size}."
+        )
+        img_h = img_w = target_image_size
+        data_cfg = {**data_cfg, "img_height": img_h, "img_width": img_w}
+
+    image_processor = AutoImageProcessor.from_pretrained(model_name)
+
+    # Update image_processor size to match training dimensions
+    # This ensures consistency when using the saved processor for inference
+    if hasattr(image_processor, "size"):
+        image_processor.size = {"height": img_h, "width": img_w}
+    if hasattr(image_processor, "crop_size"):
+        image_processor.crop_size = {"height": img_h, "width": img_w}
+
     train_ds, eval_ds = _build_datasets(data_cfg)
 
-    # Load model with config overrides from YAML
-    model_kwargs = {}
-    if "mask_ratio" in model_cfg:
-        mask_ratio = float(model_cfg["mask_ratio"])
-        if not 0.0 <= mask_ratio <= 1.0:
-            raise ValueError(f"mask_ratio must be in [0, 1], got {mask_ratio}")
-        model_kwargs["mask_ratio"] = mask_ratio
-        logger.info(f"Setting MAE mask_ratio to {mask_ratio} from config")
+    # Check if using custom dimensions (different from pretrained default 224)
+    using_custom_dimensions = target_image_size != 224
 
-    model = ViTMAEForPreTraining.from_pretrained(model_name, **model_kwargs)
-    logger.info(f"Loaded MAE model with mask_ratio={model.config.mask_ratio}")
+    if using_custom_dimensions:
+        # For custom dimensions, train MAE from scratch (no pretrained weights)
+        # This avoids position embeddings mismatch and input size validation issues
+        logger.info(
+            f"Using custom image dimensions {img_h}×{img_w} (target_image_size={target_image_size}). "
+            f"Training MAE from scratch with randomly initialized weights."
+        )
+
+        # Load config from pretrained to get architecture, but initialize model from scratch
+        from transformers import ViTMAEConfig
+        config = ViTMAEConfig.from_pretrained(model_name)
+        config.image_size = target_image_size
+
+        # Set mask_ratio if specified
+        if "mask_ratio" in model_cfg:
+            mask_ratio = float(model_cfg["mask_ratio"])
+            if not 0.0 <= mask_ratio <= 1.0:
+                raise ValueError(f"mask_ratio must be in [0, 1], got {mask_ratio}")
+            config.mask_ratio = mask_ratio
+            logger.info(f"Setting MAE mask_ratio to {mask_ratio} from config")
+
+        # Initialize model from scratch with custom config
+        model = ViTMAEForPreTraining(config)
+        logger.info(f"Initialized MAE model from scratch with image_size={model.config.image_size}, mask_ratio={model.config.mask_ratio}")
+
+    else:
+        # Standard dimensions (224×224) - load pretrained weights
+        model_kwargs = {}
+
+        # Set mask_ratio if specified
+        if "mask_ratio" in model_cfg:
+            mask_ratio = float(model_cfg["mask_ratio"])
+            if not 0.0 <= mask_ratio <= 1.0:
+                raise ValueError(f"mask_ratio must be in [0, 1], got {mask_ratio}")
+            model_kwargs["mask_ratio"] = mask_ratio
+            logger.info(f"Setting MAE mask_ratio to {mask_ratio} from config")
+
+        model = ViTMAEForPreTraining.from_pretrained(model_name, **model_kwargs)
+        logger.info(f"Loaded pretrained MAE model with image_size={model.config.image_size}, mask_ratio={model.config.mask_ratio}")
 
     data_collator = DefaultDataCollator(return_tensors="pt")
 
