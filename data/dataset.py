@@ -69,11 +69,11 @@ class Synth90kDataset(Dataset):
         top = (self.img_height - new_h)//2
         canvas.paste(image, (left, top))
 
-        #normalization
-        img_np = np.array(canvas).astype("float32")/255.0
+        # Normalization
+        img_np = np.array(canvas).astype("float32") / 255.0
         img_np = (img_np - self.mean) / self.std
-        img_np = np.transpose(img_np, (2, 0, 1))    #HWC -> CHW
-        image = torch.FloatTensor(img_np)           #shape = [3, 224, 224]
+        img_np = np.transpose(img_np, (2, 0, 1))  # HWC -> CHW
+        image = torch.FloatTensor(img_np)  # shape = [3, img_height, img_width]
 
         #classification label
         if self.labels is not None:
