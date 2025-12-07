@@ -9,6 +9,8 @@ from transformers import (
     PreTrainedModel,
     Trainer,
     TrainingArguments,
+    ViTConfig,
+    ViTModel,
     ViTMAEConfig,
     ViTMAEModel,
 )
@@ -29,15 +31,19 @@ class ImageClassificationOutput(ModelOutput):
 
 
 class ViTMAEForImageClassification(PreTrainedModel):
-    """Vision Transformer with MAE backbone for image classification."""
+    """Vision Transformer with MAE-pretrained backbone for image classification.
 
-    config_class = ViTMAEConfig
+    Uses standard ViT encoder (no masking) for classification. Can load weights
+    from MAE-pretrained checkpoints.
+    """
 
-    def __init__(self, config: ViTMAEConfig) -> None:
+    config_class = ViTConfig
+
+    def __init__(self, config: ViTConfig) -> None:
         super().__init__(config)
-        self.encoder = ViTMAEModel(config)
+        self.encoder = ViTModel(config, add_pooling_layer=False)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.classifier = nn.Linear(config.hidden_size, config.vocab_size)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
         self.post_init()
 
     def forward(self, pixel_values, labels=None, return_dict: Optional[bool] = None):
@@ -100,9 +106,34 @@ class Synth90kClassificationCollator:
             }
 
 
-def _load_vitmae_config(checkpoint: str, vocab_size: int) -> ViTMAEConfig:
-    config = ViTMAEConfig.from_pretrained(checkpoint)
-    config.vocab_size = vocab_size
+def _load_vit_config_from_mae(checkpoint: str, num_labels: int) -> ViTConfig:
+    """Load ViTConfig from a MAE checkpoint, preserving encoder architecture.
+
+    Args:
+        checkpoint: Path to MAE checkpoint or HuggingFace model ID
+        num_labels: Number of classification labels (88172 for Synth90k)
+
+    Returns:
+        ViTConfig with same architecture as MAE but for classification
+    """
+    # Load MAE config to get architecture hyperparameters
+    mae_config = ViTMAEConfig.from_pretrained(checkpoint)
+
+    # Create ViTConfig with same architecture
+    config = ViTConfig(
+        hidden_size=mae_config.hidden_size,
+        num_hidden_layers=mae_config.num_hidden_layers,
+        num_attention_heads=mae_config.num_attention_heads,
+        intermediate_size=mae_config.intermediate_size,
+        hidden_dropout_prob=mae_config.hidden_dropout_prob,
+        attention_probs_dropout_prob=mae_config.attention_probs_dropout_prob,
+        image_size=mae_config.image_size,
+        patch_size=mae_config.patch_size,
+        num_channels=mae_config.num_channels,
+        layer_norm_eps=mae_config.layer_norm_eps,
+        num_labels=num_labels,
+    )
+
     return config
 
 
@@ -140,19 +171,30 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
     data_cfg = cfg["data"]
     train_ds, eval_ds = _build_datasets(data_cfg)
 
-    config = _load_vitmae_config(mae_init, vocab_size)
+    config = _load_vit_config_from_mae(mae_init, vocab_size)
     model = ViTMAEForImageClassification(config=config)
 
+    # Load MAE encoder weights into ViT encoder
     if mae_init:
         try:
-            state = ViTMAEModel.from_pretrained(mae_init).state_dict()
-            missing, unexpected = model.encoder.load_state_dict(state, strict=False)
+            mae_encoder_state = ViTMAEModel.from_pretrained(mae_init).state_dict()
+            missing, unexpected = model.encoder.load_state_dict(mae_encoder_state, strict=False)
+
             if unexpected:
                 logger.warning("Unexpected keys when loading MAE weights: %s", unexpected)
             if missing:
-                logger.info("Missing encoder keys when loading MAE weights: %s", missing)
-        except OSError:
-            logger.warning("Could not load MAE weights from %s, training encoder from scratch", mae_init)
+                # Filter out expected missing keys (pooler)
+                pooler_keys = [k for k in missing if 'pooler' in k]
+                other_missing = [k for k in missing if 'pooler' not in k]
+
+                if other_missing:
+                    logger.warning("Unexpectedly missing encoder keys: %s", other_missing)
+                if pooler_keys:
+                    logger.info("Missing pooler keys (expected, not used): %s", pooler_keys)
+
+            logger.info("Successfully loaded MAE pretrained weights into ViT encoder")
+        except OSError as e:
+            logger.warning("Could not load MAE weights from %s, training encoder from scratch. Error: %s", mae_init, e)
 
     collator = Synth90kClassificationCollator()
     eval_strategy = "steps" if eval_ds else "no"

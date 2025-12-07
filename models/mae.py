@@ -8,9 +8,12 @@ from transformers import (
     ViTMAEForPreTraining,
 )
 from transformers.trainer_utils import set_seed
+from transformers.utils import logging
 
 from data.dataset import Synth90kDataset
 from utils.logging_callbacks import CsvLoggingCallback
+
+logger = logging.get_logger(__name__)
 
 
 class Synth90kImageDictDataset(Synth90kDataset):
@@ -46,13 +49,24 @@ def run_mae_pretraining(cfg: dict, resume_from: Optional[str] = None) -> None:
     if seed is not None:
         set_seed(seed)
 
-    model_name = cfg["model"].get("mae_checkpoint", "facebook/vit-mae-base")
+    model_cfg = cfg["model"]
+    model_name = model_cfg.get("mae_checkpoint", "facebook/vit-mae-base")
     image_processor = AutoImageProcessor.from_pretrained(model_name)
 
     data_cfg = cfg["data"]
     train_ds, eval_ds = _build_datasets(data_cfg)
 
-    model = ViTMAEForPreTraining.from_pretrained(model_name)
+    # Load model with config overrides from YAML
+    model_kwargs = {}
+    if "mask_ratio" in model_cfg:
+        mask_ratio = float(model_cfg["mask_ratio"])
+        if not 0.0 <= mask_ratio <= 1.0:
+            raise ValueError(f"mask_ratio must be in [0, 1], got {mask_ratio}")
+        model_kwargs["mask_ratio"] = mask_ratio
+        logger.info(f"Setting MAE mask_ratio to {mask_ratio} from config")
+
+    model = ViTMAEForPreTraining.from_pretrained(model_name, **model_kwargs)
+    logger.info(f"Loaded MAE model with mask_ratio={model.config.mask_ratio}")
 
     data_collator = DefaultDataCollator(return_tensors="pt")
 
