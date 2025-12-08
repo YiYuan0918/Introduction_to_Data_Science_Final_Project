@@ -9,6 +9,8 @@ from transformers import (
     PreTrainedModel,
     Trainer,
     TrainingArguments,
+    ViTConfig,
+    ViTModel,
     ViTMAEConfig,
     ViTMAEModel,
 )
@@ -29,22 +31,31 @@ class ImageClassificationOutput(ModelOutput):
 
 
 class ViTMAEForImageClassification(PreTrainedModel):
-    """Vision Transformer with MAE backbone for image classification."""
+    """Vision Transformer with MAE-pretrained backbone for image classification.
 
-    config_class = ViTMAEConfig
+    Uses standard ViT encoder (no masking) for classification. Can load weights
+    from MAE-pretrained checkpoints.
+    """
 
-    def __init__(self, config: ViTMAEConfig) -> None:
+    config_class = ViTConfig
+
+    def __init__(self, config: ViTConfig) -> None:
         super().__init__(config)
-        self.encoder = ViTMAEModel(config)
+        self.encoder = ViTModel(config, add_pooling_layer=False)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.classifier = nn.Linear(config.hidden_size, config.vocab_size)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
         self.post_init()
 
     def forward(self, pixel_values, labels=None, return_dict: Optional[bool] = None):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # Get encoder outputs
-        outputs = self.encoder(pixel_values=pixel_values, return_dict=return_dict)
+        # Use interpolate_pos_encoding=True to handle non-square or non-standard image sizes
+        outputs = self.encoder(
+            pixel_values=pixel_values,
+            interpolate_pos_encoding=True,
+            return_dict=return_dict
+        )
 
         # Use [CLS] token representation (first token)
         cls_output = outputs.last_hidden_state[:, 0, :]
@@ -100,9 +111,45 @@ class Synth90kClassificationCollator:
             }
 
 
-def _load_vitmae_config(checkpoint: str, vocab_size: int) -> ViTMAEConfig:
-    config = ViTMAEConfig.from_pretrained(checkpoint)
-    config.vocab_size = vocab_size
+def _load_vit_config_from_mae(
+    checkpoint: str,
+    num_labels: int,
+    img_height: int = 224,
+    img_width: int = 224,
+) -> ViTConfig:
+    """Load ViTConfig from a MAE checkpoint, preserving encoder architecture.
+
+    Args:
+        checkpoint: Path to MAE checkpoint or HuggingFace model ID
+        num_labels: Number of classification labels (88172 for Synth90k)
+        img_height: Target image height
+        img_width: Target image width
+
+    Returns:
+        ViTConfig with same architecture as MAE but for classification
+    """
+    # Load MAE config to get architecture hyperparameters
+    mae_config = ViTMAEConfig.from_pretrained(checkpoint)
+
+    # ViTConfig.image_size is an int, use max dimension for non-square images
+    # Position embeddings will be interpolated to match actual input size
+    target_image_size = max(img_height, img_width)
+
+    # Create ViTConfig with same architecture
+    config = ViTConfig(
+        hidden_size=mae_config.hidden_size,
+        num_hidden_layers=mae_config.num_hidden_layers,
+        num_attention_heads=mae_config.num_attention_heads,
+        intermediate_size=mae_config.intermediate_size,
+        hidden_dropout_prob=mae_config.hidden_dropout_prob,
+        attention_probs_dropout_prob=mae_config.attention_probs_dropout_prob,
+        image_size=target_image_size,
+        patch_size=mae_config.patch_size,
+        num_channels=mae_config.num_channels,
+        layer_norm_eps=mae_config.layer_norm_eps,
+        num_labels=num_labels,
+    )
+
     return config
 
 
@@ -136,23 +183,64 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
     if mae_init is None:
         raise ValueError("mae_checkpoint_for_init or model.mae_checkpoint must be provided")
 
-    image_processor = AutoImageProcessor.from_pretrained(mae_init)
     data_cfg = cfg["data"]
+    img_h = int(data_cfg.get("img_height", 224))
+    img_w = int(data_cfg.get("img_width", 224))
+
+    image_processor = AutoImageProcessor.from_pretrained(mae_init)
+
+    # Update image_processor size to match training dimensions
+    # This ensures consistency when using the saved processor for inference
+    if hasattr(image_processor, "size"):
+        image_processor.size = {"height": img_h, "width": img_w}
+    if hasattr(image_processor, "crop_size"):
+        image_processor.crop_size = {"height": img_h, "width": img_w}
+
     train_ds, eval_ds = _build_datasets(data_cfg)
 
-    config = _load_vitmae_config(mae_init, vocab_size)
+    config = _load_vit_config_from_mae(mae_init, vocab_size, img_height=img_h, img_width=img_w)
     model = ViTMAEForImageClassification(config=config)
 
+    # Load MAE encoder weights into ViT encoder
     if mae_init:
         try:
-            state = ViTMAEModel.from_pretrained(mae_init).state_dict()
-            missing, unexpected = model.encoder.load_state_dict(state, strict=False)
+            mae_encoder_state = ViTMAEModel.from_pretrained(mae_init).state_dict()
+
+            # Remove position embeddings if size mismatch (happens with custom dimensions)
+            # The model will use its own initialized position embeddings
+            # and interpolate them dynamically via interpolate_pos_encoding=True
+            if "embeddings.position_embeddings" in mae_encoder_state:
+                pretrained_pos_embed_shape = mae_encoder_state["embeddings.position_embeddings"].shape
+                current_pos_embed_shape = model.encoder.embeddings.position_embeddings.shape
+
+                if pretrained_pos_embed_shape != current_pos_embed_shape:
+                    logger.info(
+                        f"Skipping position embeddings due to size mismatch: "
+                        f"pretrained {pretrained_pos_embed_shape} vs current {current_pos_embed_shape}. "
+                        f"Model will use randomly initialized position embeddings with dynamic interpolation."
+                    )
+                    del mae_encoder_state["embeddings.position_embeddings"]
+
+            missing, unexpected = model.encoder.load_state_dict(mae_encoder_state, strict=False)
+
             if unexpected:
                 logger.warning("Unexpected keys when loading MAE weights: %s", unexpected)
             if missing:
-                logger.info("Missing encoder keys when loading MAE weights: %s", missing)
-        except OSError:
-            logger.warning("Could not load MAE weights from %s, training encoder from scratch", mae_init)
+                # Filter out expected missing keys (pooler and position_embeddings)
+                pooler_keys = [k for k in missing if 'pooler' in k]
+                pos_embed_keys = [k for k in missing if 'position_embeddings' in k]
+                other_missing = [k for k in missing if 'pooler' not in k and 'position_embeddings' not in k]
+
+                if other_missing:
+                    logger.warning("Unexpectedly missing encoder keys: %s", other_missing)
+                if pooler_keys:
+                    logger.info("Missing pooler keys (expected, not used): %s", pooler_keys)
+                if pos_embed_keys:
+                    logger.info("Missing position embeddings (expected with custom dimensions): %s", pos_embed_keys)
+
+            logger.info("Successfully loaded MAE pretrained weights into ViT encoder")
+        except OSError as e:
+            logger.warning("Could not load MAE weights from %s, training encoder from scratch. Error: %s", mae_init, e)
 
     collator = Synth90kClassificationCollator()
     eval_strategy = "steps" if eval_ds else "no"
