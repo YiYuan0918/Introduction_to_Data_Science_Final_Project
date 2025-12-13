@@ -1,5 +1,8 @@
 from typing import Optional
 
+import numpy as np
+import torch
+from PIL import Image
 from transformers import (
     AutoImageProcessor,
     DefaultDataCollator,
@@ -20,9 +23,38 @@ class Synth90kImageDictDataset(Synth90kDataset):
     """Wrap Synth90kDataset outputs into the dict format expected by HF data collators."""
 
     def __getitem__(self, idx: int):
-        sample = super().__getitem__(idx)
-        image = sample[0] if isinstance(sample, tuple) else sample
-        return {"pixel_values": image}
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            try:
+                path = self.paths[idx]
+                image = Image.open(path).convert('RGB')
+                
+                # resize
+                w, h = image.size
+                scale = min(self.img_width / w, self.img_height / h)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                image = image.resize((new_w, new_h), resample=Image.BILINEAR)
+                
+                # padding
+                canvas = Image.new("RGB", (self.img_width, self.img_height), (0, 0, 0))
+                left = (self.img_width - new_w) // 2
+                top = (self.img_height - new_h) // 2
+                canvas.paste(image, (left, top))
+                
+                # Normalization
+                img_np = np.array(canvas).astype("float32") / 255.0
+                img_np = (img_np - self.mean) / self.std
+                img_np = np.transpose(img_np, (2, 0, 1))  # HWC -> CHW
+                image = torch.FloatTensor(img_np)
+                
+                return {"pixel_values": image}
+            except (IOError, OSError):
+                logger.warning(f'Corrupted image at index {idx}, attempting next image...')
+                idx = (idx + 1) % len(self.paths)
+                if attempt == max_attempts - 1:
+                    # If all attempts fail, raise an error
+                    raise RuntimeError(f"Failed to load a valid image after {max_attempts} attempts")
 
 
 def _build_datasets(data_cfg: dict):
@@ -152,6 +184,7 @@ def run_mae_pretraining(cfg: dict, resume_from: Optional[str] = None) -> None:
         optim=training_cfg.get("optim", "adamw_torch"),
         adam_beta1=float(training_cfg.get("adam_beta1", 0.9)),
         adam_beta2=float(training_cfg.get("adam_beta2", 0.999)),
+        label_names=["pixel_values"],
     )
 
     trainer = Trainer(

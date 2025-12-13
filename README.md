@@ -19,24 +19,32 @@ Introduction_to_Data_Science_Final_Project/
 ├── .gitignore                # Git ignore rules
 │
 ├── configs/                   # Configuration files
-│   └── config.yaml           # Training and model configurations
+│   └── cls.yaml              # Training and model configurations
 │
-├── data/                      # Data directory (not tracked by git)
-|   ├── __init__.py           # data package initialization
-|   ├── dataset.py            # dataset & dataloader implementation 
-│   └── .gitkeep              # Keep empty directory in git
+├── data/                      # Data processing module
+│   ├── __init__.py           # Data package initialization
+│   └── dataset.py            # Dataset & dataloader implementation 
 │
 ├── models/                    # Model definitions
-│   └── __init__.py           # Model package initialization
+│   └── classifier.py         # ViT classification model
 │
 ├── utils/                     # Utility functions
-│   └── __init__.py           # Utils package initialization
+│   └── logging_callbacks.py  # Training callbacks
 │
 ├── train.py                   # Training script
 ├── infer.py                   # Inference/prediction script
 │
-└── tests/                     # Unit tests
-    └── .gitkeep              # Keep empty directory in git
+├── tests/                     # Testing
+│   ├── test.py               # Test set evaluation script
+│   └── results_test.json     # Test results
+│
+├── results/                   # Reports and visualizations
+│   ├── generate_html_report.py  # Report generator
+│   ├── training_report.html     # HTML training report
+│   └── learning_curve.png       # Learning curve plot
+│
+└── outputs/                   # Model outputs
+    └── classifier/           # Trained classifier model
 ```
 
 ## Installation
@@ -114,13 +122,46 @@ If training is interrupted, you can resume from a checkpoint:
 python train.py --config <config_file> --resume_from <checkpoint_path>
 ```
 
-### Inference
+### Evaluation (Testing)
 
-To run inference on new data:
+To evaluate the trained model on the test set:
 
 ```bash
-python infer.py --model-path <path-to-trained-model> --input <input-data>
+python tests/test.py --model-dir outputs/classifier --config configs/cls.yaml --split test
 ```
+
+This will output Top-1, Top-5, Top-10 accuracy and save results to `tests/results_test.json`.
+
+### Inference
+
+To run inference on new images:
+
+```bash
+# Single image
+python infer.py --model-dir outputs/classifier --config configs/cls.yaml --input path/to/image.jpg
+
+# Directory of images
+python infer.py --model-dir outputs/classifier --config configs/cls.yaml --input path/to/images/
+
+# Show top-5 predictions with probabilities
+python infer.py --model-dir outputs/classifier --config configs/cls.yaml --input path/to/image.jpg --top-k 5 --show-probs
+```
+
+### Generate Report
+
+To generate a comprehensive HTML training report:
+
+```bash
+python results/generate_html_report.py
+```
+
+The report will be saved to `results/training_report.html` and includes:
+- Model architecture details
+- Training configuration
+- Dataset statistics
+- Training/Validation loss curves
+- Test set evaluation results
+- Overfitting analysis
 
 ## Dataset: Synth90k
 This project uses the Synth90k synthetic word recognition dataset for word-level image classification.

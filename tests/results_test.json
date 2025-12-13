@@ -1,0 +1,9 @@
+{
+  "split": "test",
+  "total_samples": 891927,
+  "correct_predictions": 868188,
+  "accuracy": 0.973384593133743,
+  "top5_accuracy": 0.9833136568351446,
+  "top10_accuracy": 0.9851759168631513,
+  "loss": 0.24498624958278503
+}
