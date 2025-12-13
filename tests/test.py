@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Test Set Evaluation Script for ViT Classification Model
-對測試集進行評估，計算 accuracy 和其他指標
+對測試集進行評估，計算 accuracy, precision, recall, F1 等指標
 
 Usage:
     python tests/test.py --model-dir outputs/classifier --config configs/cls.yaml
@@ -16,6 +16,7 @@ from tqdm import tqdm
 import sys
 import torch
 from torch.utils.data import DataLoader
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 # 添加專案根目錄到 path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,10 +88,25 @@ def evaluate(model, dataloader, device):
     top10_accuracy = top10_correct / total_samples
     avg_loss = total_loss / total_samples
     
+    # 計算 weighted precision, recall, F1
+    print("\n📊 Computing precision, recall, F1 (this may take a moment)...")
+    precision_weighted = precision_score(
+        all_labels, all_predictions, average='weighted', zero_division=0
+    )
+    recall_weighted = recall_score(
+        all_labels, all_predictions, average='weighted', zero_division=0
+    )
+    f1_weighted = f1_score(
+        all_labels, all_predictions, average='weighted', zero_division=0
+    )
+    
     return {
         "accuracy": accuracy,
         "top5_accuracy": top5_accuracy,
         "top10_accuracy": top10_accuracy,
+        "precision_weighted": precision_weighted,
+        "recall_weighted": recall_weighted,
+        "f1_weighted": f1_weighted,
         "loss": avg_loss,
         "total_samples": total_samples,
         "correct_predictions": correct_predictions,
@@ -161,9 +177,14 @@ def main():
     print(f"   Total Samples: {results['total_samples']:,}")
     print(f"   Correct Predictions: {results['correct_predictions']:,}")
     print(f"   ")
-    print(f"   📈 Top-1 Accuracy: {results['accuracy']*100:.2f}%")
-    print(f"   📈 Top-5 Accuracy: {results['top5_accuracy']*100:.2f}%")
+    print(f"   📈 Top-1 Accuracy:  {results['accuracy']*100:.2f}%")
+    print(f"   📈 Top-5 Accuracy:  {results['top5_accuracy']*100:.2f}%")
     print(f"   📈 Top-10 Accuracy: {results['top10_accuracy']*100:.2f}%")
+    print(f"   ")
+    print(f"   🎯 Precision (weighted): {results['precision_weighted']*100:.2f}%")
+    print(f"   🎯 Recall (weighted):    {results['recall_weighted']*100:.2f}%")
+    print(f"   🎯 F1-Score (weighted):  {results['f1_weighted']*100:.2f}%")
+    print(f"   ")
     print(f"   📉 Average Loss: {results['loss']:.4f}")
     print("=" * 60)
     
@@ -179,6 +200,9 @@ def main():
         "accuracy": results["accuracy"],
         "top5_accuracy": results["top5_accuracy"],
         "top10_accuracy": results["top10_accuracy"],
+        "precision_weighted": results["precision_weighted"],
+        "recall_weighted": results["recall_weighted"],
+        "f1_weighted": results["f1_weighted"],
         "loss": results["loss"],
     }
     

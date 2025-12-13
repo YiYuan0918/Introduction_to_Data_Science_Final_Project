@@ -691,6 +691,20 @@ def generate_html_report(model_path, output_path=None):
                     <div class="label">Top-10 Accuracy</div>
                 </div>
             </div>
+            <div class="grid" style="grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px;">
+                <div class="highlight-box" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                    <div class="value">''' + f"{test_results.get('precision_weighted', 0)*100:.2f}%" + '''</div>
+                    <div class="label">Precision (weighted)</div>
+                </div>
+                <div class="highlight-box" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                    <div class="value">''' + f"{test_results.get('recall_weighted', 0)*100:.2f}%" + '''</div>
+                    <div class="label">Recall (weighted)</div>
+                </div>
+                <div class="highlight-box" style="background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);">
+                    <div class="value">''' + f"{test_results.get('f1_weighted', 0)*100:.2f}%" + '''</div>
+                    <div class="label">F1-Score (weighted)</div>
+                </div>
+            </div>
             <div style="margin-top: 20px;">
                 <table>
                     <tr>
