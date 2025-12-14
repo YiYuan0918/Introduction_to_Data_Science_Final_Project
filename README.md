@@ -123,6 +123,8 @@ With 88,172 classes, the classification head is large (~67M parameters). You may
 Just train the model at **Stage 2** with setting the `freeze_encoder` in `configs/cls.yaml` as **False**, if you want to replicate our result.
 
 ```bash
+cp configs/cls.replication.yaml configs/cls.yaml
+
 python train.py --config configs/cls.yaml
 ```
 
