@@ -242,6 +242,26 @@ def run_classification_training(cfg: dict, resume_from: Optional[str] = None) ->
         except OSError as e:
             logger.warning("Could not load MAE weights from %s, training encoder from scratch. Error: %s", mae_init, e)
 
+    # 凍結 encoder 參數 (Linear Probing: 只訓練 classifier head)
+    freeze_encoder = training_cfg.get("freeze_encoder", False)
+    if freeze_encoder:
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+        
+        # 統計可訓練參數
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        frozen_params = total_params - trainable_params
+        
+        logger.info("🔒 Encoder FROZEN (Linear Probing mode)")
+        logger.info(f"   Total parameters: {total_params:,}")
+        logger.info(f"   Frozen parameters: {frozen_params:,}")
+        logger.info(f"   Trainable parameters: {trainable_params:,} (classifier head only)")
+    else:
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logger.info("🔥 Encoder UNFROZEN (Fine-tuning mode)")
+        logger.info(f"   Trainable parameters: {trainable_params:,} (full model)")
+
     collator = Synth90kClassificationCollator()
     eval_strategy = "steps" if eval_ds else "no"
     load_best = eval_strategy != "no" and bool(training_cfg.get("load_best_model_at_end", True))

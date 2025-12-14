@@ -7,19 +7,20 @@ data:
   train_split: train
   val_split: val
   test_split: test
-  img_height: 64
-  img_width: 128
-  num_workers: 4
+  img_height: 48
+  img_width: 96
+  num_workers: 8
 
 model:
-  mae_checkpoint: facebook/vit-mae-base  # outputs/mae_pretrain
+  mae_checkpoint: outputs/mae_pretrain  # outputs/mae_pretrain
 
 training:
   classifier:
-    output_dir: outputs/classifier
-    num_train_epochs: 100
-    per_device_train_batch_size: 64
-    per_device_eval_batch_size: 64
+    output_dir: outputs/mae_pretrained_classifier
+    freeze_encoder: true  # true: Linear Probing (只訓練 classifier), false: Fine-tuning (整個模型)
+    num_train_epochs: 10
+    per_device_train_batch_size: 128
+    per_device_eval_batch_size: 128
     learning_rate: 5.0e-4
     lr_scheduler_type: cosine
     warmup_steps: 0
@@ -38,6 +39,6 @@ training:
     metric_for_best_model: eval_loss
     greater_is_better: false
     gradient_accumulation_steps: 1
-    mae_checkpoint_for_init: facebook/vit-mae-base  # outputs/mae_pretrain
+    mae_checkpoint_for_init: outputs/mae_pretrain  # outputs/mae_pretrain
     fp16: true
     report_to: none

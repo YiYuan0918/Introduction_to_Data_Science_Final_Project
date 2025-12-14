@@ -124,13 +124,39 @@ python train.py --config <config_file> --resume_from <checkpoint_path>
 
 ### Evaluation (Testing)
 
-To evaluate the trained model on the test set:
+To evaluate the trained model on the test set or validation set:
 
 ```bash
+# Evaluate on test set
 python tests/test.py --model-dir outputs/classifier --config configs/cls.yaml --split test
+
+# Evaluate on validation set
+python tests/test.py --model-dir outputs/classifier --config configs/cls.yaml --split val
 ```
 
-This will output Top-1, Top-5, Top-10 accuracy and save results to `tests/results_test.json`.
+**Metrics Computed:**
+- Top-1, Top-5, Top-10 Accuracy
+- Precision (weighted)
+- Recall (weighted)
+- F1-Score (weighted)
+- Average Loss
+
+**Output:**
+Results are saved to `tests/results_{split}.json` with the following format:
+```json
+{
+  "split": "test",
+  "total_samples": 891927,
+  "correct_predictions": 868188,
+  "accuracy": 0.9734,
+  "top5_accuracy": 0.9833,
+  "top10_accuracy": 0.9852,
+  "precision_weighted": 0.9734,
+  "recall_weighted": 0.9734,
+  "f1_weighted": 0.9734,
+  "loss": 0.2450
+}
+```
 
 ### Inference
 
@@ -145,6 +171,9 @@ python infer.py --model-dir outputs/classifier --config configs/cls.yaml --input
 
 # Show top-5 predictions with probabilities
 python infer.py --model-dir outputs/classifier --config configs/cls.yaml --input path/to/image.jpg --top-k 5 --show-probs
+
+# Verify predictions against ground truth (auto search train/val/test annotations)
+python infer.py --model-dir outputs/classifier --config configs/cls.yaml --input path/to/image.jpg --top-k 5 --show-probs --verify
 ```
 
 ### Generate Report
