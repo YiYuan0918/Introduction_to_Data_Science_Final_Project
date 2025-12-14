@@ -112,7 +112,19 @@ python train.py --config configs/cls.yaml
 
 The trained classifier will be saved to `outputs/classifier`. Make sure the `mae_checkpoint_for_init` parameter in your config points to the correct MAE checkpoint path from Stage 1.
 
-**Note:** With 88,172 classes, the classification head is large (~67M parameters). You may need to reduce batch size (to 32 or 16) if you encounter out-of-memory errors.
+**Note:**<br>
+If you have used **Stage 1** to train the model, you may set the `freeze_encoder` in `configs/cls.yaml` as **True** at the **Stage 2**.<br>
+If not, set the `freeze_encoder` in `configs/cls.yaml` as **False** at the **Stage 2**.
+
+**Note:**<br>
+With 88,172 classes, the classification head is large (~67M parameters). You may need to reduce batch size (to 32 or 16) if you encounter out-of-memory errors.
+
+### Replicating Our Results
+Just train the model at **Stage 2** with setting the `freeze_encoder` in `configs/cls.yaml` as **False**, if you want to replicate our result.
+
+```bash
+python train.py --config configs/cls.yaml
+```
 
 ### Resuming Training
 
