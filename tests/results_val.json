@@ -1,0 +1,12 @@
+{
+  "split": "val",
+  "total_samples": 802734,
+  "correct_predictions": 781662,
+  "accuracy": 0.9737497103648282,
+  "top5_accuracy": 0.9833207513323218,
+  "top10_accuracy": 0.9851756621745186,
+  "precision_weighted": 0.9779640983010307,
+  "recall_weighted": 0.9737497103648282,
+  "f1_weighted": 0.9743433250825777,
+  "loss": 0.24313474605428928
+}
