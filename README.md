@@ -80,25 +80,23 @@ pip install -r requirements.txt
 ## Usage
 
 This project has two training methods: one-stage training approach, and two-stage training approach.
-
 - One-Stage Training Approach:
     1. Classifier fine-tuning for word-level image classification with **unfreezed** pretrained MAE.
-
 - Two-Stage Training Approach:
     1. MAE pretraining for self-supervised visual representation learning
     2. Classifier fine-tuning for word-level image classification with **freezed** pretrained MAE.
 
-This project, we used **one-stage training approach**.
+**Note:**
+- This project, we used **one-stage training approach**.
+- For the **two-stage training approach**, we just finished MAE pretraining, the classifier are still being trained. So, there is no result currently. 
 
 ### Configuration Setup
 
 Example configuration files are provided as templates. Copy them to create your own configs:
-
 - One-Stage Training Approach:
     ```bash
     cp configs/cls.one_stage.yaml configs/cls.yaml
     ```
-
 - Two-Stage Training Approach:
     ```bash
     cp configs/mae.two_stage.yaml configs/mae.yaml
@@ -111,8 +109,6 @@ Edit the config files to adjust parameters like data paths, batch size, learning
 
 The classifier stage fine-tunes the model for word-level image classification using CrossEntropyLoss on the Synth90k dataset. It loads the MAE pretrained encoder and adds a classification head for 88,172 word classes.
 
-For the MAE, we used the base pretrained weights from HuggingFace.
-
 ```bash
 python train.py --config configs/cls.yaml
 ```
@@ -123,7 +119,7 @@ The trained classifier will be saved to `outputs/classifier`.
 
 **Stage 1: MAE Pretraining**
 
-The classifier stage fine-tunes the model for word-level image classification using CrossEntropyLoss on the Synth90k dataset. It loads the MAE pretrained encoder and adds a classification head for 88,172 word classes.
+The MAE (Masked Autoencoder) stage pretrains a Vision Transformer encoder by learning to reconstruct masked image patches. This provides strong visual representations for downstream tasks.
 
 ```bash
 python train.py --config configs/mae.yaml
@@ -141,8 +137,9 @@ python train.py --config configs/cls.yaml
 
 The trained classifier will be saved to `outputs/classifier`. Make sure the `mae_checkpoint_for_init` parameter in your config points to the correct MAE checkpoint path from Stage 1.
 
-**Note:**<br>
-With 88,172 classes, the classification head is large (~67M parameters). You may need to reduce batch size (to 32 or 16) if you encounter out-of-memory errors.
+**Note:**
+- With 88,172 classes, the classification head is large (~67M parameters). You may need to reduce batch size (to 32 or 16) if you encounter out-of-memory errors.
+- For the MAE, we used the base pretrained weights from HuggingFace.
 
 ### Resuming Training
 
@@ -152,8 +149,11 @@ If training is interrupted, you can resume from a checkpoint:
 python train.py --config <config_file> --resume_from <checkpoint_path>
 ```
 
-We also provide pretrained weight, you can download, and put in the `outputs/classifier`.Here is the download link:<br>
-THIS_IS_DOWNLOAD_LINK
+### Our Trained Model Weights
+For this project, we have uploaded the trained model weights to Google Cloud, you can download, and put in the `outputs/classifier`. The following are download links:
+- [Classifoer with **One-Stage Training Approach**](https://drive.google.com/file/d/1Ib4o9TBqI434xnE1PbJQbo_1OzZGtIeL/view?usp=sharing)
+- [MAE with **Two-Stage Training Approach**](https://drive.google.com/file/d/1YX3EO91brRXLGWdUxD4zHloKYORttOdI/view?usp=sharing)
+- Classifoer with **Two-Stage Training Approach** (Still being trained)
 
 ### Evaluation (Testing)
 
