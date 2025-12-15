@@ -1,0 +1,38 @@
+task: mae
+seed: 42
+
+data:
+  root: dataset/minDataset
+  train_split: train
+  val_split: val
+  test_split: test
+  img_height: 128
+  img_width: 128
+  num_workers: 8
+
+model:
+  mae_checkpoint: facebook/vit-mae-base
+  mask_ratio: 0.9
+
+training:
+  mae:
+    output_dir: outputs/mae_pretrain
+    num_train_epochs: 10
+    per_device_train_batch_size: 64
+    per_device_eval_batch_size: 64
+    learning_rate: 1.0e-4
+    weight_decay: 0.05
+    warmup_steps: 10000
+    logging_steps: 5000
+    eval_steps: 10000
+    save_steps: 10000
+    save_total_limit: 3
+    load_best_model_at_end: true
+    metric_for_best_model: eval_loss
+    greater_is_better: false
+    gradient_accumulation_steps: 2
+    fp16: true
+    report_to: none
+    optim: adamw_torch
+    adam_beta1: 0.9
+    adam_beta2: 0.95
